@@ -1,0 +1,119 @@
+name: Test Apex popup interactions
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'Apex-v*.html'
+      - '.github/workflows/test-apex-popups.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  popup-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Syntax and source checks
+        shell: bash
+        run: |
+          node <<'JS'
+          const fs = require('fs');
+          const path = require('path');
+          const all=fs.readdirSync('.').map(name=>({name,version:/^Apex-v(\d+)\.html$/.exec(name)})).filter(x=>x.version);
+          if(!all.length)throw Error('No versioned Apex file');
+          const file=all.sort((a,b)=>Number(b.version[1])-Number(a.version[1]))[0].name;
+          fs.writeFileSync('/tmp/apex_test_file',file);
+          const html=fs.readFileSync(file,'utf8');
+          const script=html.match(/<script>([\s\S]*?)<\/script>/);
+          if(!script)throw Error('Missing inline CRM script');
+          fs.writeFileSync('/tmp/apex_test_script.js',script[1]);
+          if(!html.includes('font-size:18px')||!html.includes('max-height:220px'))throw Error('Popup sizing missing');
+          console.log('Checked source:',file,html.length,'characters');
+          JS
+          node --check /tmp/apex_test_script.js
+
+      - name: Install browser test runtime
+        shell: bash
+        run: |
+          npm install --no-save --no-package-lock playwright@1.55.0
+          if ! command -v google-chrome >/dev/null 2>&1 && ! command -v chromium >/dev/null 2>&1; then npx playwright install chromium --with-deps; fi
+
+      - name: Test desktop and mobile popup interactions
+        shell: bash
+        run: |
+          node <<'JS'
+          const {chromium}=require('playwright');
+          const {pathToFileURL}=require('url');
+          const fs=require('fs'),cp=require('child_process'),path=require('path');
+          (async()=>{
+            let executablePath;
+            try{executablePath=cp.execSync('command -v google-chrome || command -v chromium',{encoding:'utf8'}).trim();}catch{}
+            const browser=await chromium.launch({headless:true,...(executablePath?{executablePath}:{})});
+            try{
+              const source=fs.readFileSync('/tmp/apex_test_file','utf8').trim();
+              const url=pathToFileURL(path.resolve(source)).href;
+              for(const size of [{width:2560,height:1200},{width:1280,height:850},{width:390,height:844}]){
+                const mobile=size.width<700;
+                const page=await browser.newPage({viewport:size,isMobile:mobile,hasTouch:mobile});
+                const errors=[];page.on('pageerror',e=>errors.push(String(e)));
+                await page.goto(url);
+                const all=page.locator('tr.lead-row'),num=await all.count();
+                if(num!==40)throw Error('Expected 40 leads, got '+num);
+                if(!await page.locator('#communications').isVisible())throw Error('Communications panel missing');
+                const c=all.first().locator('td[data-col-id="company"]');
+                await c.click();
+                const d=page.locator('.company-inline');
+                if(await d.count()!==1)throw Error('Company popup did not open');
+                const metrics=await page.evaluate(()=>{
+                  const popup=document.querySelector('.company-inline'),first=document.querySelector('tr.lead-row td[data-col-id="company"]'),bank=popup.querySelector('.bank-account-header'),mobile=popup.querySelector('.company-contact-list .phone-line');
+                  return {height:popup.getBoundingClientRect().height,x:popup.getBoundingClientRect().left,companyX:first.getBoundingClientRect().left,scrollWidth:popup.scrollWidth,clientWidth:popup.clientWidth,sections:popup.querySelectorAll('.company-subsection').length,bankY:bank.getBoundingClientRect().top,mobileY:mobile.getBoundingClientRect().top,emojis:[...popup.querySelectorAll('.btn-icon')].every(x=>getComputedStyle(x).fontSize==='18px')};
+                });
+                if(metrics.height>220.5)throw Error('Popup taller than 220: '+JSON.stringify(metrics));
+                if(metrics.sections!==5||!metrics.emojis)throw Error('Missing sections or emoji sizing '+JSON.stringify(metrics));
+                if(Math.abs(metrics.x-metrics.companyX)>3)throw Error('Popup does not start at Company column: '+JSON.stringify(metrics));
+                if(metrics.scrollWidth>metrics.clientWidth+2)throw Error('Internal horizontal scrolling: '+JSON.stringify(metrics));
+                if(Math.abs(metrics.bankY-metrics.mobileY)>7)throw Error('Bank rows are not aligned: '+JSON.stringify(metrics));
+                if(await d.locator('.company-inline-header,.bank-month-head,.bank-field-label').count())throw Error('Old popup header remains');
+                if(mobile){
+                  await page.screenshot({path:'/tmp/apex-popup-mobile.png'});
+                }else{
+                  await page.screenshot({path:'/tmp/apex-popup-'+size.width+'.png'});
+                  await c.click();
+                  if(await d.count())throw Error('Company popup did not toggle closed');
+                  await all.first().locator('td[data-col-id="phone"]').click();
+                  if(await page.locator('#popupContent .phone-line').count()<5)throw Error('Phone popup lost numbers');
+                  if(await page.locator('#popupContent .btn-icon').evaluate(x=>getComputedStyle(x).fontSize)!=='18px')throw Error('Phone popup emoji mismatch');
+                  await all.first().locator('td[data-col-id="email"]').click();
+                  if(await page.locator('#popupContent .email-line').count()<3)throw Error('Email popup lost addresses');
+                  await page.keyboard.press('Escape');
+                  if(await page.locator('#popupContent').isVisible())throw Error('Escape failed');
+                }
+                if(errors.length)throw Error('Browser exceptions: '+errors.join(' | '));
+                console.log('Passed browser checks:',size.width,metrics);
+                await page.close();
+              }
+              const page=await browser.newPage();await page.goto(url);
+              const result=await page.evaluate(()=>{
+                const data={...records[0],bank_accounts:[{bank_name:'Chase Bank',account:'1111',statements:[{month:'Sep',deposit:30000,ending:15000}]},{bank_name:'Wells Fargo',account:'2222',statements:[{month:'Aug',deposit:10000,ending:9000}]}]};
+                const wrapper=document.createElement('div');wrapper.innerHTML=companyPopupMarkup(data);
+                return {accounts:wrapper.querySelectorAll('.bank-account').length,blue:wrapper.querySelectorAll('.bank-month .balance-emphasis').length,headers:wrapper.querySelectorAll('.bank-account-header').length};
+              });
+              if(result.accounts!==2||result.headers!==2||result.blue!==1)throw Error('Multi-bank fixture failed: '+JSON.stringify(result));
+              console.log('Multi-bank fixture passed:',result);
+              await page.close();
+            }finally{await browser.close()}
+          })().catch(e=>{console.error(e);process.exitCode=1});
+          JS
+
+      - name: Save visual test screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: apex-popup-smoke-screenshots
+          path: /tmp/apex-popup-*.png
+          if-no-files-found: ignore
