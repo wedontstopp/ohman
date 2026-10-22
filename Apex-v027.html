@@ -64,6 +64,12 @@
 .bank-month>span:nth-child(n+2){text-align:right}
 .bank-month-head{position:sticky;top:0;z-index:1;background:#fff;color:#5a6e8a;font-size:10px}
 .bank-statement-rows{max-height:120px;overflow-y:auto;overflow-x:hidden;overscroll-behavior-y:contain;scrollbar-width:thin;scrollbar-color:#ccd5df transparent}
+.bank-accounts{width:max-content;max-height:172px;overflow-y:auto;overflow-x:hidden;overscroll-behavior-y:contain;scrollbar-width:thin;scrollbar-color:#ccd5df transparent}
+.bank-account{width:max-content;min-width:max-content}
+.bank-account+.bank-account{border-top:1px solid #e2eaf5;margin-top:7px;padding-top:5px}
+.bank-identity{position:sticky;top:0;background:#fff;z-index:2}
+.bank-month-head{position:static}
+.bank-statement-rows{max-height:none;overflow:visible}
 /* Communications: scoped premium styling, one list/detail controller, no network dependencies. */
 .comms-divider{flex:0 0 10px;align-self:stretch;position:relative;cursor:col-resize;touch-action:none;user-select:none;outline-offset:-2px}
 .comms-divider::after{content:"";position:absolute;left:4px;top:calc(50% - 18px);width:2px;height:36px;border-radius:2px;background:var(--strong)}
@@ -269,18 +275,41 @@ function companyAddressMarkup(value){
  const street=text.slice(0,comma).trim(),cityStateZip=text.slice(comma+1).trim();
  return `<span>${esc(street)}</span><span>${esc(cityStateZip)}</span>`;
 }
+function bankAccountItems(d){
+ const mask=value=>{
+  const raw=String(value||'').replace(/^.*?·\s*/,'').trim();
+  const match=raw.match(/(\d{4})\s*$/);
+  return match?'••••'+match[1]:raw;
+ };
+ const normalize=a=>({
+  bank:String(a.bank_name||a.bank||a.name||d.bank_name||'').trim(),
+  account:mask(a.account_number||a.account||a.number||d.bank_account),
+  statements:(Array.isArray(a.financial_months)?a.financial_months:Array.isArray(a.statements)?a.statements:Array.isArray(a.months)?a.months:[]).map(m=>({month:String(m.label||m.month||m.date||''),deposit:m.deposits??m.deposit,ending:m.ending??m.balance}))
+ });
+ const direct=Array.isArray(d.bank_accounts)?d.bank_accounts:Array.isArray(d.bankAccounts)?d.bankAccounts:[];
+ if(direct.length)return direct.map(normalize).filter(a=>a.bank||a.account||a.statements.length);
+ const groups=new Map();
+ for(const month of Array.isArray(d.financial_months)?d.financial_months:[]){
+  const bank=String(month.bank||month.bank_name||d.bank_name||'').trim();
+  const account=mask(month.account||month.account_number||d.bank_account);
+  const key=bank+'|'+account;
+  if(!groups.has(key))groups.set(key,{bank,account,statements:[]});
+  groups.get(key).statements.push({month:String(month.label||month.month||month.date||''),deposit:month.deposits??month.deposit,ending:month.ending??month.balance});
+ }
+ if(groups.size>1)return [...groups.values()];
+ return [{bank:String(d.bank_name||'').trim(),account:mask(d.bank_account),statements:statementItems(d)}];
+}
 function companyPopupMarkup(d){
  const extraAddress=addresses(d).filter(x=>x!==String(d.address||'').trim())[0];
  const facts=[['DBA',d.dba],['App date',appDate(d)],['EIN',d.ein],['SSN',d.ssn],['Industry',d.industry],['DOB',age(d.dob)],['Established',years(d)],['Address',extraAddress]].filter(([,v])=>String(v??'').trim());
- const phones=phoneItems(d),statements=statementItems(d);
+ const phones=phoneItems(d),accounts=bankAccountItems(d);
  const group=(title,values,actions)=>`<section class="company-subsection"><div class="lbl">${title}</div><div class="company-rows">${values.map(v=>contactRow(v,actions)).join('')}</div></section>`;
- const account=String(d.bank_account||'').replace(/^.*?[·]/,'').trim();
  return `<div class="company-inline-layout">`+
  `<section class="company-subsection company-info"><div class="lbl">Company Info</div><dl class="company-facts">${facts.map(([label,value])=>`<div class="company-fact"><dt>${esc(label)}</dt><dd class="${label==='Address'?'company-address':''}" data-copy="${esc(value)}">${label==='Address'?companyAddressMarkup(value):esc(value)}</dd></div>`).join('')}</dl></section>`+
  group('Mobile',phones.mobile,['phone','sms','wa'])+
  group('Landline',phones.landline,['phone'])+
  group('Email',contactEmails(d),['mail'])+
- `<section class="company-subsection company-bank"><div class="lbl">Bank Information</div><div class="bank-identity"><div><span class="bank-field-label">Bank</span><span data-copy="${esc(d.bank_name)}">${esc(d.bank_name)}</span></div><div><span class="bank-field-label">Account #</span><span data-copy="${esc(account)}">${esc(account)}</span></div></div><div class="bank-statements"><div class="bank-month bank-month-head"><span>Month</span><span>Deposits</span><span>Balance</span></div><div class="bank-statement-rows">${statements.map(item=>`<div class="bank-month"><span>${esc(item.month)}</span><span data-copy="${esc(money(item.deposit))}">${esc(money(item.deposit))}</span><span class="${Number(item.ending)>10000?'balance-emphasis':''}" data-copy="${esc(money(item.ending))}">${esc(money(item.ending))}</span></div>`).join('')}</div></div></section></div>`;
+ `<section class="company-subsection company-bank"><div class="lbl">Bank Information</div><div class="bank-accounts">${accounts.map(a=>`<div class="bank-account"><div class="bank-identity bank-account-header"><div><span class="bank-field-label">Bank</span><span data-copy="${esc(a.bank)}">${esc(a.bank)}</span></div><div><span class="bank-field-label">Account #</span><span data-copy="${esc(a.account)}">${esc(a.account)}</span></div></div><div class="bank-statements"><div class="bank-month bank-month-head"><span>Month</span><span>Deposits</span><span>Balance</span></div><div class="bank-statement-rows">${a.statements.map(item=>`<div class="bank-month"><span>${esc(item.month)}</span><span data-copy="${esc(money(item.deposit))}">${esc(money(item.deposit))}</span><span class="${Number(item.ending)>10000?'balance-emphasis':''}" data-copy="${esc(money(item.ending))}">${esc(money(item.ending))}</span></div>`).join('')}</div></div></div>`).join('')}</div></section></div>`;
 }
 function popupMarkup(d,type){
  const phones=phoneItems(d),emails=contactEmails(d),places=addresses(d),acts=activityItems(d),statements=statementItems(d);
