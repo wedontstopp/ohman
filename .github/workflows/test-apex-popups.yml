@@ -68,6 +68,7 @@ jobs:
                 const c=all.first().locator('td[data-col-id="company"]');
                 await c.click();
                 const d=page.locator('.company-inline');
+                await d.waitFor({state:'attached',timeout:2500});
                 if(await d.count()!==1)throw Error('Company popup did not open');
                 const metrics=await page.evaluate(()=>{
                   const popup=document.querySelector('.company-inline'),first=document.querySelector('tr.lead-row td[data-col-id="company"]'),bank=popup.querySelector('.bank-account-header'),mobile=popup.querySelector('.company-contact-list .phone-line');
@@ -84,11 +85,14 @@ jobs:
                 }else{
                   await page.screenshot({path:'/tmp/apex-popup-'+size.width+'.png'});
                   await c.click();
+                  await d.waitFor({state:'detached',timeout:2500});
                   if(await d.count())throw Error('Company popup did not toggle closed');
                   await all.first().locator('td[data-col-id="phone"]').click();
+                  await page.locator('#popupShade').waitFor({state:'visible',timeout:2500});
                   if(await page.locator('#popupContent .phone-line').count()<5)throw Error('Phone popup lost numbers');
                   if(await page.locator('#popupContent .btn-icon').evaluate(x=>getComputedStyle(x).fontSize)!=='18px')throw Error('Phone popup emoji mismatch');
                   await all.first().locator('td[data-col-id="email"]').click();
+                  await page.waitForTimeout(320);
                   if(await page.locator('#popupContent .email-line').count()<3)throw Error('Email popup lost addresses');
                   await page.keyboard.press('Escape');
                   if(await page.locator('#popupContent').isVisible())throw Error('Escape failed');
