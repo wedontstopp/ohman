@@ -1,0 +1,64 @@
+name: Publish latest Apex CRM
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'Apex-v*.html'
+      - '.github/workflows/publish-latest-apex.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Select highest Apex version and prepare clean site URL
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import re
+          import shutil
+          from pathlib import Path
+
+          candidates = []
+          for file in Path('.').glob('Apex-v*.html'):
+              match = re.fullmatch(r'Apex-v(\d+)\.html', file.name, flags=re.IGNORECASE)
+              if match:
+                  candidates.append((int(match.group(1)), file))
+
+          if not candidates:
+              raise SystemExit('No numbered Apex-vNNN.html source file exists.')
+
+          version, source = max(candidates, key=lambda item: item[0])
+          site = Path('_site')
+          site.mkdir(exist_ok=True)
+          shutil.copyfile(source, site / 'index.html')
+          print(f'Prepared Apex v{version} ({source.name}) as /index.html for deployment.')
+          PY
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload website artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
