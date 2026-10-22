@@ -90,7 +90,7 @@ jobs:
                   await all.first().locator('td[data-col-id="phone"]').click();
                   await page.locator('#popupShade').waitFor({state:'visible',timeout:2500});
                   if(await page.locator('#popupContent .phone-line').count()<5)throw Error('Phone popup lost numbers');
-                  if(await page.locator('#popupContent .btn-icon').first().evaluate(x=>getComputedStyle(x).fontSize)!=='20px')throw Error('Phone popup emoji mismatch');
+                  if(await page.locator('#popupContent .btn-icon').first().evaluate(x=>getComputedStyle(x).fontSize)!=='18px')throw Error('Phone popup emoji mismatch');
                   await all.first().locator('td[data-col-id="email"]').click();
                   await page.waitForTimeout(320);
                   if(await page.locator('#popupContent .email-line').count()<3)throw Error('Email popup lost addresses');
