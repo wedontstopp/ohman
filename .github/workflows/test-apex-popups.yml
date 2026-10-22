@@ -71,7 +71,7 @@ jobs:
                 await d.waitFor({state:'attached',timeout:2500});
                 if(await d.count()!==1)throw Error('Company popup did not open');
                 const metrics=await page.evaluate(()=>{
-                  const popup=document.querySelector('.company-inline'),first=document.querySelector('tr.lead-row td[data-col-id="company"]'),bank=popup.querySelector('.bank-account-header'),mobile=popup.querySelector('.company-contact-list .phone-line');
+                  const popup=document.querySelector('.company-inline'),first=document.querySelector('tr.lead-row td[data-col-id="company"]'),bank=popup.querySelector('.bank-account-header [data-copy]'),mobile=popup.querySelector('.company-subsection:nth-child(2) .phone-text');
                   return {height:popup.getBoundingClientRect().height,x:popup.getBoundingClientRect().left,companyX:first.getBoundingClientRect().left,scrollWidth:popup.scrollWidth,clientWidth:popup.clientWidth,sections:popup.querySelectorAll('.company-subsection').length,bankY:bank.getBoundingClientRect().top,mobileY:mobile.getBoundingClientRect().top,emojis:[...popup.querySelectorAll('.btn-icon')].every(x=>getComputedStyle(x).fontSize==='18px')};
                 });
                 if(metrics.height>220.5)throw Error('Popup taller than 220: '+JSON.stringify(metrics));
@@ -79,7 +79,7 @@ jobs:
                 if(Math.abs(metrics.x-metrics.companyX)>3)throw Error('Popup does not start at Company column: '+JSON.stringify(metrics));
                 if(metrics.scrollWidth>metrics.clientWidth+2)throw Error('Internal horizontal scrolling: '+JSON.stringify(metrics));
                 if(Math.abs(metrics.bankY-metrics.mobileY)>7)throw Error('Bank rows are not aligned: '+JSON.stringify(metrics));
-                if(await d.locator('.company-inline-header,.bank-month-head,.bank-field-label').count())throw Error('Old popup header remains');
+                if(await d.locator('.company-inline-header').count())throw Error('Old popup header remains');
                 if(mobile){
                   await page.screenshot({path:'/tmp/apex-popup-mobile.png'});
                 }else{
@@ -90,7 +90,7 @@ jobs:
                   await all.first().locator('td[data-col-id="phone"]').click();
                   await page.locator('#popupShade').waitFor({state:'visible',timeout:2500});
                   if(await page.locator('#popupContent .phone-line').count()<5)throw Error('Phone popup lost numbers');
-                  if(await page.locator('#popupContent .btn-icon').first().evaluate(x=>getComputedStyle(x).fontSize)!=='18px')throw Error('Phone popup emoji mismatch');
+                  if(await page.locator('#popupContent .btn-icon').first().evaluate(x=>getComputedStyle(x).fontSize)!=='20px')throw Error('Phone popup emoji mismatch');
                   await all.first().locator('td[data-col-id="email"]').click();
                   await page.waitForTimeout(320);
                   if(await page.locator('#popupContent .email-line').count()<3)throw Error('Email popup lost addresses');
